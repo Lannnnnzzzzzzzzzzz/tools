@@ -5,188 +5,200 @@ import * as cheerio from "cheerio";
 const app = express();
 const BASE_URL = "https://komikstation.org";
 
-// 🔹 axios instance dengan headers biar lolos anti-scraping
-const instance = axios.create({
-  baseURL: BASE_URL,
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115 Safari/537.36",
-    "Referer": BASE_URL,
-    "Accept-Language": "en-US,en;q=0.9",
-  },
+// ✅ Route utama
+app.get("/", (req, res) => {
+  res.json({
+    message: "✅ API Manhwa Scraper is running!",
+    endpoints: [
+      "/api/manhwa-new",
+      "/api/manhwa-popular",
+      "/api/manhwa-top",
+      "/api/manhwa-ongoing",
+      "/api/manhwa-recommendation",
+      "/api/manhwa-detail/:id",
+      "/api/chapter/:id",
+      "/api/genres",
+      "/api/genre/:id",
+      "/api/genre/:id/page/:page",
+      "/api/search/:query",
+      "/api/search/:query/page/:page",
+      "/api/list"
+    ],
+  });
 });
 
-// Helper buat parse manhwa list
-function parseManhwaList($, selector) {
-  const result = [];
-  $(selector).each((i, el) => {
-    const title = $(el).find(".tt h4").text().trim() || $(el).find(".tt").text().trim();
-    const link = $(el).find("a").attr("href");
-    const thumb = $(el).find("img").attr("src");
-    result.push({ title, link, thumb });
+// Helper: scrap list manhwa
+const scrapeList = async (url) => {
+  const { data } = await axios.get(url);
+  const $ = cheerio.load(data);
+  let results = [];
+  $(".utao .uta").each((i, el) => {
+    results.push({
+      title: $(el).find(".luf h3 a").text(),
+      link: $(el).find(".luf h3 a").attr("href"),
+      latest: $(el).find(".luf ul li:first a").text(),
+      thumbnail: $(el).find(".imgu img").attr("src"),
+    });
   });
-  return result;
-}
+  return results;
+};
 
 // 1. New Manhwa
 app.get("/api/manhwa-new", async (req, res) => {
   try {
-    const { data } = await instance.get("/");
-    const $ = cheerio.load(data);
-    res.json(parseManhwaList($, ".animepost"));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const results = await scrapeList(`${BASE_URL}`);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 2. Popular Manhwa
+// 2. Manhwa Populer
 app.get("/api/manhwa-popular", async (req, res) => {
   try {
-    const { data } = await instance.get("/");
-    const $ = cheerio.load(data);
-    res.json(parseManhwaList($, ".wpopanime .series"));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const results = await scrapeList(`${BASE_URL}/project-popular/`);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 3. Top Manhwa (mapping ke bagian rekom/top)
+// 3. Manhwa Top
 app.get("/api/manhwa-top", async (req, res) => {
   try {
-    const { data } = await instance.get("/");
-    const $ = cheerio.load(data);
-    res.json(parseManhwaList($, ".series .tt"));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const results = await scrapeList(`${BASE_URL}/project-teratas/`);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 4. Ongoing Manhwa
+// 4. Manhwa Ongoing
 app.get("/api/manhwa-ongoing", async (req, res) => {
   try {
-    const { data } = await instance.get("/manga/?status=ongoing");
-    const $ = cheerio.load(data);
-    res.json(parseManhwaList($, ".animepost"));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const results = await scrapeList(`${BASE_URL}/project-ongoing/`);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 5. Recommendation
+// 5. Manhwa Recommendation
 app.get("/api/manhwa-recommendation", async (req, res) => {
   try {
-    const { data } = await instance.get("/");
-    const $ = cheerio.load(data);
-    res.json(parseManhwaList($, ".series .animposx"));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const results = await scrapeList(`${BASE_URL}/project-rekomendasi/`);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 6. Manhwa Detail
+// 6. Manhwa Details
 app.get("/api/manhwa-detail/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { data } = await instance.get(`/manga/${id}/`);
+    const url = `${BASE_URL}/manga/${req.params.id}`;
+    const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
-    const title = $(".entry-title").text().trim();
-    const thumb = $(".thumb img").attr("src");
-    const desc = $(".desc p").text().trim();
-    const chapters = [];
+    const title = $(".entry-title").text();
+    const thumbnail = $(".infomanga .thumb img").attr("src");
+    const desc = $(".entry-content p").text();
 
-    $(".lchx .lch").each((i, el) => {
-      const ch_title = $(el).find("a").text().trim();
-      const ch_link = $(el).find("a").attr("href");
-      chapters.push({ ch_title, ch_link });
+    let chapters = [];
+    $(".clstyle li").each((i, el) => {
+      chapters.push({
+        chapter: $(el).find("a").text().trim(),
+        link: $(el).find("a").attr("href"),
+      });
     });
 
-    res.json({ title, thumb, desc, chapters });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.json({ title, thumbnail, desc, chapters });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 7. Chapter Detail
+// 7. Chapter Details
 app.get("/api/chapter/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { data } = await instance.get(`/chapter/${id}/`);
+    const url = `${BASE_URL}/${req.params.id}`;
+    const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
-    const images = [];
-    $(".reading-content img").each((i, el) => {
+    let images = [];
+    $(".reader-area img").each((i, el) => {
       images.push($(el).attr("src"));
     });
 
-    res.json({ chapter: id, images });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.json({ chapter: req.params.id, images });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 8. Genres
+// 8. Genre List
 app.get("/api/genres", async (req, res) => {
   try {
-    const { data } = await instance.get("/genres/");
+    const { data } = await axios.get(BASE_URL);
     const $ = cheerio.load(data);
-    const result = [];
+
+    let genres = [];
     $(".genres li a").each((i, el) => {
-      result.push({
-        name: $(el).text().trim(),
+      genres.push({
+        name: $(el).text(),
         link: $(el).attr("href"),
       });
     });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+
+    res.json(genres);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 9 & 10. Genre List + Pagination
+// 9 & 10. Manhwa by Genre (+ page)
 app.get("/api/genre/:id/page/:page?", async (req, res) => {
   try {
     const { id, page } = req.params;
-    const url = page
-      ? `/genres/${id}/page/${page}/`
-      : `/genres/${id}/`;
-    const { data } = await instance.get(url);
-    const $ = cheerio.load(data);
-    res.json(parseManhwaList($, ".animepost"));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const url = `${BASE_URL}/genre/${id}/page/${page || 1}`;
+    const results = await scrapeList(url);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 11 & 12. Search + Pagination
+// 11 & 12. Search (+ page)
 app.get("/api/search/:query/page/:page?", async (req, res) => {
   try {
     const { query, page } = req.params;
-    const url = page
-      ? `/?s=${encodeURIComponent(query)}&page=${page}`
-      : `/?s=${encodeURIComponent(query)}`;
-    const { data } = await instance.get(url);
-    const $ = cheerio.load(data);
-    res.json(parseManhwaList($, ".animepost"));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const url = `${BASE_URL}/page/${page || 1}?s=${query}`;
+    const results = await scrapeList(url);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
 // 13. A-Z List
 app.get("/api/list", async (req, res) => {
   try {
-    const { data } = await instance.get("/manga-list/");
+    const { data } = await axios.get(`${BASE_URL}/daftar-komik/`);
     const $ = cheerio.load(data);
-    res.json(parseManhwaList($, ".animepost"));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
-// Start server
-app.listen(3000, () => {
-  console.log("✅ API ready on port 3000");
+    let results = [];
+    $(".daftar .animepost").each((i, el) => {
+      results.push({
+        title: $(el).find(".tt h4").text(),
+        link: $(el).find("a").attr("href"),
+        thumbnail: $(el).find("img").attr("src"),
+      });
+    });
+
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default app;
