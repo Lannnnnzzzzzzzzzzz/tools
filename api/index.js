@@ -3,57 +3,34 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 const BASE_URL = "https://komikstation.org";
 
-// 🔹 axios fetch dengan headers biar aman (hindari 403)
-const fetchHtml = async (url) => {
+// 🔹 helper fetch html
+async function fetchHtml(url) {
   const { data } = await axios.get(url, {
     headers: {
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Referer": BASE_URL,
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/116 Safari/537.36",
     },
   });
   return data;
-};
+}
 
-// ✅ Route utama
-app.get("/", (req, res) => {
-  res.json({
-    message: "✅ API Manhwa Scraper is running!",
-    endpoints: [
-      "/api/manhwa-new",
-      "/api/manhwa-popular",
-      "/api/manhwa-top",
-      "/api/manhwa-ongoing",
-      "/api/manhwa-recommendation",
-      "/api/manhwa-detail/:id",
-      "/api/chapter/:id",
-      "/api/genres",
-      "/api/genre/:id",
-      "/api/genre/:id/page/:page",
-      "/api/search/:query",
-      "/api/search/:query/page/:page",
-      "/api/list",
-    ],
-  });
-});
-
-// 🔹 1. New Manhwa
-app.get("/api/manhwa-new", async (req, res) => {
+// 🔹 1. Home (manhwa terbaru)
+app.get("/api/home", async (req, res) => {
   try {
     const data = await fetchHtml(BASE_URL);
     const $ = cheerio.load(data);
     const results = [];
 
-    $(".utao .uta").each((i, el) => {
-      results.push({
-        title: $(el).find(".luf h3 a").text(),
-        link: $(el).find(".luf h3 a").attr("href"),
-        latest: $(el).find(".luf ul li:first a").text(),
-        thumbnail: $(el).find(".imgu img").attr("src"),
-      });
+    $(".listupd .utao").each((i, el) => {
+      const title = $(el).find(".uta .luf h3 a").text().trim();
+      const link = $(el).find(".uta .luf h3 a").attr("href");
+      const thumbnail = $(el).find(".imgu img").attr("src");
+      const latest_chapter = $(el).find(".uta .luf ul li a").first().text();
+
+      results.push({ title, link, thumbnail, latest_chapter });
     });
 
     res.json(results);
@@ -62,19 +39,19 @@ app.get("/api/manhwa-new", async (req, res) => {
   }
 });
 
-// 🔹 2. Popular Manhwa
-app.get("/api/manhwa-popular", async (req, res) => {
+// 🔹 2. Daftar semua manhwa
+app.get("/api/list", async (req, res) => {
   try {
-    const data = await fetchHtml(`${BASE_URL}/popular`);
+    const data = await fetchHtml(`${BASE_URL}/daftar-komik/`);
     const $ = cheerio.load(data);
     const results = [];
 
-    $(".utao .uta").each((i, el) => {
-      results.push({
-        title: $(el).find(".luf h3 a").text(),
-        link: $(el).find(".luf h3 a").attr("href"),
-        thumbnail: $(el).find(".imgu img").attr("src"),
-      });
+    $(".listupd .utao").each((i, el) => {
+      const title = $(el).find(".uta .luf h3 a").text().trim();
+      const link = $(el).find(".uta .luf h3 a").attr("href");
+      const thumbnail = $(el).find(".imgu img").attr("src");
+
+      results.push({ title, link, thumbnail });
     });
 
     res.json(results);
@@ -83,19 +60,75 @@ app.get("/api/manhwa-popular", async (req, res) => {
   }
 });
 
-// 🔹 3. Top Manhwa
-app.get("/api/manhwa-top", async (req, res) => {
+// 🔹 3. Detail manhwa
+app.get("/api/detail", async (req, res) => {
   try {
-    const data = await fetchHtml(`${BASE_URL}/top`);
+    const url = req.query.url;
+    if (!url) return res.status(400).json({ error: "url param required" });
+
+    const data = await fetchHtml(url);
+    const $ = cheerio.load(data);
+
+    const title = $(".entry-title").text().trim();
+    const thumbnail = $(".thumb img").attr("src");
+    const synopsis = $(".entry-content p").first().text().trim();
+    const genres = [];
+    $(".genres a").each((i, el) => {
+      genres.push($(el).text().trim());
+    });
+
+    const chapters = [];
+    $(".eplister ul li").each((i, el) => {
+      chapters.push({
+        chapter: $(el).find(".eph-num a").text().trim(),
+        link: $(el).find(".eph-num a").attr("href"),
+        date: $(el).find(".eph-date").text().trim(),
+      });
+    });
+
+    res.json({ title, thumbnail, synopsis, genres, chapters });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 🔹 4. Baca chapter
+app.get("/api/chapter", async (req, res) => {
+  try {
+    const url = req.query.url;
+    if (!url) return res.status(400).json({ error: "url param required" });
+
+    const data = await fetchHtml(url);
+    const $ = cheerio.load(data);
+
+    const images = [];
+    $(".reading-content img").each((i, el) => {
+      const img = $(el).attr("src");
+      if (img) images.push(img);
+    });
+
+    res.json({ images });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 🔹 5. Pencarian
+app.get("/api/search", async (req, res) => {
+  try {
+    const q = req.query.q;
+    if (!q) return res.status(400).json({ error: "q param required" });
+
+    const data = await fetchHtml(`${BASE_URL}/?s=${q}`);
     const $ = cheerio.load(data);
     const results = [];
 
-    $(".utao .uta").each((i, el) => {
-      results.push({
-        title: $(el).find(".luf h3 a").text(),
-        link: $(el).find(".luf h3 a").attr("href"),
-        thumbnail: $(el).find(".imgu img").attr("src"),
-      });
+    $(".listupd .utao").each((i, el) => {
+      const title = $(el).find(".uta .luf h3 a").text().trim();
+      const link = $(el).find(".uta .luf h3 a").attr("href");
+      const thumbnail = $(el).find(".imgu img").attr("src");
+
+      results.push({ title, link, thumbnail });
     });
 
     res.json(results);
@@ -104,45 +137,36 @@ app.get("/api/manhwa-top", async (req, res) => {
   }
 });
 
-// 🔹 4. Ongoing Manhwa
-app.get("/api/manhwa-ongoing", async (req, res) => {
+// 🔹 6. Genre list
+app.get("/api/genres", async (req, res) => {
   try {
-    const data = await fetchHtml(`${BASE_URL}/ongoing`);
+    const data = await fetchHtml(`${BASE_URL}/daftar-genre/`);
     const $ = cheerio.load(data);
-    const results = [];
 
-    $(".utao .uta").each((i, el) => {
-      results.push({
-        title: $(el).find(".luf h3 a").text(),
-        link: $(el).find(".luf h3 a").attr("href"),
-        thumbnail: $(el).find(".imgu img").attr("src"),
+    const genres = [];
+    $(".genre-list a").each((i, el) => {
+      genres.push({
+        name: $(el).text().trim(),
+        link: $(el).attr("href"),
       });
     });
 
-    res.json(results);
+    res.json(genres);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 🔹 5. Recommendation Manhwa
-app.get("/api/manhwa-recommendation", async (req, res) => {
-  try {
-    const data = await fetchHtml(`${BASE_URL}/recommendation`);
-    const $ = cheerio.load(data);
-    const results = [];
+// 🔹 default route
+app.get("/", (req, res) => {
+  res.send("✅ Komikstation API Scraper aktif!");
+});
 
-    $(".utao .uta").each((i, el) => {
-      results.push({
-        title: $(el).find(".luf h3 a").text(),
-        link: $(el).find(".luf h3 a").attr("href"),
-        thumbnail: $(el).find(".imgu img").attr("src"),
-      });
-    });
+app.listen(PORT, () => {
+  console.log(`Server jalan di http://localhost:${PORT}`);
+});
 
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+export default app;    res.status(500).json({ error: err.message });
   }
 });
 
